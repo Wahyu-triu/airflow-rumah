@@ -1,0 +1,8 @@
+apache-airflow==2.9.1
+apache-airflow-providers-postgres
+apache-airflow-providers-celery
+requests
+beautifulsoup4
+lxml
+psycopg2-binary
+redis

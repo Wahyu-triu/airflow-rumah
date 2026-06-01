@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.pytest_cache
+venv/
+env/
+ENV/
+.venv/
+.ipynb_checkpoints/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Airflow logs and runtime
+airflow_logs/
+logs/
+*.log
+
+# Docker
+*.env
+.env.
+docker-compose.override.yml
+
+# PostgreSQL data directories
+postgres_data/
+postgres_airflow_data/
+
+# Sensitive and local data
+.env
+belirumah_results.json
+*.secret.json
+*.private.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db

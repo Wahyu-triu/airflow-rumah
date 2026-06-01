@@ -1,0 +1,98 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  build: .
+  env_file: .env
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./scraper:/opt/airflow/scraper
+    - ./logs:/opt/airflow/logs
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+
+  # ── Airflow metadata DB ────────────────────────────────────────────────
+  postgres-airflow:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  # ── Property data DB (your listings) ──────────────────────────────────
+  postgres-data:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: property_user
+      POSTGRES_PASSWORD: property_pass
+      POSTGRES_DB: property_db
+    ports:
+      - "5433:5432"       # expose to host for direct querying
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "property_user", "-d", "property_db"]
+      interval: 10s
+      retries: 5
+
+  # ── Redis (Celery broker) ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  # ── Airflow init (runs once) ───────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - >
+        airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com
+    restart: "no"
+
+  # ── Airflow Webserver ──────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Scheduler ──────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Worker ─────────────────────────────────────────────────────
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_airflow_data:
+  postgres_data:
