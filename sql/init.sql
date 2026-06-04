@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS property_listings (
     bedrooms           INT,
     bathrooms          INT,
     floors             INT,
-    electrical_voltage INT
+    electrical_voltage INT,
+    agent_name         TEXT,
+    date_published     TIMESTAMPTZ,
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_property_id_scraped_date

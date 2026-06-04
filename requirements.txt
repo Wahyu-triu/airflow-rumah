@@ -6,3 +6,5 @@ beautifulsoup4
 lxml
 psycopg2-binary
 redis
+playwright
+dateparser

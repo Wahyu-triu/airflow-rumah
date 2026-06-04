@@ -24,11 +24,13 @@ Output fields per listing:
     bathrooms          (int|None)  : number of bathrooms (KM)
     floors             (int|None)  : number of floors
     electrical_voltage (int|None)  : electrical power in Watts/VA
+    date_published     (str|None)  : e.g. "3 hari lalu", "1 bulan lalu"
+
+This code is create for testing and demonstration purposes.
 """
 
 import json
 from utils import scrape_belirumah
-
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -58,6 +60,8 @@ if __name__ == "__main__":
         print(f"       Bed / Bath  : {p['bedrooms']} / {p['bathrooms']}")
         print(f"       Floors      : {p['floors']}")
         print(f"       Electricity : {p['electrical_voltage']} W")
+        print(f"       Agent       : {p['agent_name']}")
+        print(f"       Published   : {p['date_published']}")
         print()
 
     output_file = "belirumah_results.json"

@@ -7,5 +7,8 @@ USER airflow
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+USER root
+RUN playwright install --with-deps chromium
+
 # Make the scraper importable inside DAGs
 COPY scraper/ /opt/airflow/scraper/

@@ -18,3 +18,5 @@ class PropertyListing:
     bathrooms:          Optional[int] = None
     floors:             Optional[int] = None
     electrical_voltage: Optional[int] = None
+    agent_name:         Optional[str] = None
+    date_published:     Optional[str] = None

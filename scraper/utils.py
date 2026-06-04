@@ -2,14 +2,23 @@
 # Utils or Helpers
 # ---------------------------------------------------------------------------
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+import dateparser
 import requests
 from bs4 import BeautifulSoup
 import logging
-from typing import Optional
+from typing import Optional 
 import re
 import time
 from dataclasses import asdict
 from .data_model import PropertyListing
+# from data_model import PropertyListing
+import os
+import psycopg2
+from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Base Configuration
@@ -17,6 +26,7 @@ from .data_model import PropertyListing
 
 BASE_URL    = "https://belirumah.co/jual/rumah"
 DETAIL_BASE = "https://belirumah.co"
+DB_CONN  = os.environ["PROPERTY_DB_CONN"]
 
 HEADERS = {
     "User-Agent": (
@@ -40,13 +50,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def _get(url: str, session: requests.Session, retries: int = 3) -> Optional[BeautifulSoup]:
+def _get(url: str, session: requests.Session or bool, retries: int = 3) -> Optional[BeautifulSoup]:
     """GET a URL and return a parsed BeautifulSoup, or None on failure."""
     for attempt in range(1, retries + 1):
         try:
-            resp = session.get(url, headers=HEADERS, timeout=20)
-            resp.raise_for_status()
-            return BeautifulSoup(resp.text, "lxml")
+            if session:
+                resp = session.get(url, headers=HEADERS, timeout=20)
+                resp.raise_for_status()
+                html = resp.text
+            
+            else:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    page.goto(url, timeout=60000)
+                    
+                    try:
+                        page.wait_for_selector('[class*="posted--at"]', timeout=15000)
+                    except Exception:
+                        print("The element took too long to load or didn't appear.")
+                    
+                    # Grab the finished HTML after the wait is done
+                    html = page.content()
+                    browser.close()
+
+            # return BeautifulSoup(resp.text, "lxml")
+            return BeautifulSoup(html, "lxml")
+        
         except requests.RequestException as exc:
             logger.warning("Attempt %d/%d failed for %s: %s", attempt, retries, url, exc)
             if attempt < retries:
@@ -78,24 +108,12 @@ def _parse_price(raw: str) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Listing-page parser  (THE BUG WAS HERE)
+# Listing-page parser 
 # ---------------------------------------------------------------------------
 
 def _collect_cards(soup: BeautifulSoup):
     """
     Return a list of (anchor_tag, card_tag) pairs, one per unique listing.
-
-    Root-cause of the original bug
-    --------------------------------
-    The old code walked **up 4 levels** from every <a href="/properti/…">.
-    4 levels up lands on the shared grid/list container that wraps ALL cards,
-    so every iteration re-parsed the same first listing.
-
-    Fix
-    ---
-    Use `anchor.parent` — exactly **one level up** — which is the individual
-    card div.  All sibling data (price, location h4, area text, bedroom count)
-    lives inside that direct parent, not 4 levels higher.
     """
     anchors = soup.find_all("a", href=re.compile(r"^/properti/rumah/"))
 
@@ -111,15 +129,11 @@ def _collect_cards(soup: BeautifulSoup):
         if prop_id in seen_ids:
             continue
         seen_ids.add(prop_id)
-
-        # ── FIX: one level up, not four ──────────────────────────────────
         card = anchor.parent
-        # ─────────────────────────────────────────────────────────────────
 
         cards.append((anchor, card, prop_id, href))
 
     return cards
-
 
 def _parse_card(anchor, card, prop_id: str) -> PropertyListing:
     """Extract listing fields from a single card div."""
@@ -160,6 +174,18 @@ def _parse_card(anchor, card, prop_id: str) -> PropertyListing:
         prop.bedrooms  = int(digit_spans[0])
     if len(digit_spans) >= 2:
         prop.bathrooms = int(digit_spans[1])
+    
+    # Try to extract a human-readable relative publish time from the card text,
+
+    date_match = card.find(class_=re.compile(r"posted--at"))
+    if date_match:
+        relative_text = date_match.get_text(strip=True)
+        relative_text = relative_text.split()[0]
+        prop.date_published = str(dateparser.parse(relative_text))
+
+    agent_name = card.find(class_=re.compile(r"agent--info-container"))
+    if agent_name:
+        prop.agent_name = agent_name.get_text(strip=True)
 
     return prop
 
@@ -225,6 +251,40 @@ def _parse_detail(soup: BeautifulSoup, prop: PropertyListing) -> PropertyListing
 
     return prop
 
+# ---------------------------------------------------------------------------
+# Database connect
+# ---------------------------------------------------------------------------
+def load_property_ids(db_conn: str = DB_CONN) -> set[str]:
+    """Return the set of existing property IDs from Postgres."""
+
+    collect_data_query = """
+        SELECT DISTINCT property_id FROM property_listings;
+    """
+
+    try:
+        conn = psycopg2.connect(db_conn)
+    except psycopg2.OperationalError as exc:
+        if "postgres-data" in db_conn:
+            fallback_conn = db_conn.replace("postgres-data:5432", "localhost:5433")
+            logger.warning(
+                "DB host %s not reachable from this environment; trying fallback %s",
+                "postgres-data",
+                fallback_conn,
+            )
+            conn = psycopg2.connect(fallback_conn)
+        else:
+            raise
+
+    try:
+        with conn.cursor() as cur:
+            logger.info("Connected to database, fetching existing property IDs...")
+            cur.execute(collect_data_query)
+            
+            # Fetch all rows
+            property_ids = {row[0] for row in cur.fetchall()}
+    finally:
+        conn.close()
+    return property_ids
 
 # ---------------------------------------------------------------------------
 # Main scraper
@@ -247,11 +307,16 @@ def scrape_belirumah(location: str, pages: int) -> list[dict]:
     session  = requests.Session()
     results: list[PropertyListing] = []
 
+    # Load existing property IDs to avoid duplicates in the database
+    existing_ids = load_property_ids()
+
     for page_num in range(1, pages + 1):
         url = f"{BASE_URL}?page={page_num}&q={location.lower()}"
         logger.info("Fetching listing page %d → %s", page_num, url)
 
-        soup = _get(url, session)
+        soup = _get(url, session=False)
+        # with open("debug.html", "w", encoding="utf-8") as f:
+        #     f.write(soup.prettify())
         if soup is None:
             logger.error("Skipping page %d (fetch failed).", page_num)
             continue
@@ -264,6 +329,10 @@ def scrape_belirumah(location: str, pages: int) -> list[dict]:
         logger.info("Found %d unique cards on page %d.", len(cards), page_num)
 
         for anchor, card, prop_id, href in cards:
+            if prop_id in existing_ids:
+                logger.info("Skipping existing property: %s", prop_id)
+                continue
+
             prop = _parse_card(anchor, card, prop_id)
 
             # Fetch detail page for enriched fields
@@ -271,7 +340,7 @@ def scrape_belirumah(location: str, pages: int) -> list[dict]:
             logger.info("  → detail: %s", detail_url)
             time.sleep(REQUEST_DELAY)
 
-            detail_soup = _get(detail_url, session)
+            detail_soup = _get(detail_url, session=session)
             if detail_soup:
                 prop = _parse_detail(detail_soup, prop)
 

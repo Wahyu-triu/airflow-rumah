@@ -18,14 +18,14 @@ from scraper.utils import scrape_belirumah
 logger = logging.getLogger(__name__)
 
 LOCATION = "Bogor"
-PAGES    = 2          # how many listing pages per daily run
+PAGES    = 5        # how many listing pages per daily run
 
 DB_CONN  = os.environ["PROPERTY_DB_CONN"]   # set in .env
 
 default_args = {
-    "owner":            "airflow",
-    "retries":          2,
-    "retry_delay":      timedelta(minutes=5),
+    "owner": "airflow",
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
     "email_on_failure": False,
 }
 
@@ -50,11 +50,13 @@ def task_load(**context):
         INSERT INTO property_listings (
             property_id, scraped_at, property_name, location, price,
             land_area_m2, building_area_m2, certificate, hoek,
-            bedrooms, bathrooms, floors, electrical_voltage
+            bedrooms, bathrooms, floors, electrical_voltage,
+            agent_name, date_published
         ) VALUES (
             %(property_id)s, NOW(), %(property_name)s, %(location)s, %(price)s,
             %(land_area_m2)s, %(building_area_m2)s, %(certificate)s, %(hoek)s,
-            %(bedrooms)s, %(bathrooms)s, %(floors)s, %(electrical_voltage)s
+            %(bedrooms)s, %(bathrooms)s, %(floors)s, %(electrical_voltage)s,
+            %(agent_name)s, %(date_published)s
         )
         ON CONFLICT (property_id, ((scraped_at AT TIME ZONE 'UTC')::DATE)) DO NOTHING;
     """
