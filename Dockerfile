@@ -12,3 +12,4 @@ RUN playwright install --with-deps chromium
 
 # Make the scraper importable inside DAGs
 COPY scraper/ /opt/airflow/scraper/
+COPY embedding_properties/ /opt/airflow/embedding_properties/

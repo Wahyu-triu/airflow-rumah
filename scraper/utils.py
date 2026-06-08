@@ -135,6 +135,14 @@ def _collect_cards(soup: BeautifulSoup):
 
     return cards
 
+def format_string_date(string_date):
+    exlucde_key = [
+            'sekitar', 'kurang dari', 'lebih dari', 'kurang', 'lebih'
+        ]
+    for d in exlucde_key:
+        string_date = string_date.replace(d, '')
+    return string_date
+
 def _parse_card(anchor, card, prop_id: str) -> PropertyListing:
     """Extract listing fields from a single card div."""
     prop = PropertyListing()
@@ -178,10 +186,13 @@ def _parse_card(anchor, card, prop_id: str) -> PropertyListing:
     # Try to extract a human-readable relative publish time from the card text,
 
     date_match = card.find(class_=re.compile(r"posted--at"))
-    if date_match:
+    if date_match != None and date_match != 'None':
         relative_text = date_match.get_text(strip=True)
-        relative_text = relative_text.split()[0]
-        prop.date_published = str(dateparser.parse(relative_text))
+        relative_text = format_string_date(relative_text)
+        clean_date = str(dateparser.parse(relative_text))
+    else:
+        clean_date = "1999-01-01 00:00:00+07"
+    prop.date_published = clean_date
 
     agent_name = card.find(class_=re.compile(r"agent--info-container"))
     if agent_name:

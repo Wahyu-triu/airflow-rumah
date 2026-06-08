@@ -8,3 +8,6 @@ psycopg2-binary
 redis
 playwright
 dateparser
+python-telegram-bot
+langchain-experimental
+openai

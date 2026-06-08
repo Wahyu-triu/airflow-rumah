@@ -14,13 +14,15 @@ import sys
 sys.path.insert(0, "/opt/airflow")
 
 from scraper.utils import scrape_belirumah
+from embedding_properties.embed_properties import ingest_embedding_dag
 
 logger = logging.getLogger(__name__)
 
 LOCATION = "Bogor"
-PAGES    = 5        # how many listing pages per daily run
+PAGES    = 1        # how many listing pages per daily run
 
 DB_CONN  = os.environ["PROPERTY_DB_CONN"]   # set in .env
+OPENAI_KEY = os.environ["OPENAI_API_KEY"]
 
 default_args = {
     "owner": "airflow",
@@ -69,6 +71,17 @@ def task_load(**context):
     finally:
         conn.close()
 
+def task_embedding(**context):
+    """Pull listings from XCom, Embedd using embedding model upsert into Postgres."""
+    listings = context["ti"].xcom_pull(key="listings", task_ids="scrape_listings")
+    if not listings:
+        logger.warning("No listings to load.")
+        return
+    
+    ingest_embedding_dag(
+        openai_key=OPENAI_KEY, 
+        properties=listings
+    )
 
 # ── DAG definition ─────────────────────────────────────────────────────────
 
@@ -91,5 +104,10 @@ with DAG(
         task_id="load_to_postgres",
         python_callable=task_load,
     )
+    
+    embedd = PythonOperator(
+        task_id="embedd_data_using_llm",
+        python_callable=task_embedding,
+    )
 
-    scrape >> load
+    scrape >> load >> embedd

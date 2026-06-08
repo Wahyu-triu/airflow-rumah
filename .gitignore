@@ -35,6 +35,7 @@ postgres_airflow_data/
 belirumah_results.json
 *.secret.json
 *.private.json
+*test
 
 # Jupyter
 .ipynb_checkpoints/
