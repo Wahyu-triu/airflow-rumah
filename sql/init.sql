@@ -31,3 +31,11 @@ CREATE TABLE property_embeddings (
     content TEXT,
     embedding VECTOR(1536)
 );
+
+CREATE TABLE chat_messages_history (
+    user_id BIGINT NOT NULL,
+    chat_id BIGINT NOT NULL,
+    role VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);

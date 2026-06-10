@@ -19,6 +19,17 @@ def create_document(row):
     Building Area: {row['building_area_m2']}
     """
 
+def create_db_connection(db_conn):
+    try:
+        conn = psycopg2.connect(db_conn)
+    except psycopg2.OperationalError as exc:
+        if "postgres-data" in db_conn:
+            fallback_conn = db_conn.replace("postgres-data:5432", "localhost:5433")
+            conn = psycopg2.connect(fallback_conn)
+        else:
+            raise
+    return conn
+
 def get_embedding(client, text):
 
     response = client.embeddings.create(
@@ -29,15 +40,7 @@ def get_embedding(client, text):
     return response.data[0].embedding
 
 def insert_embedding(db_conn, property_id, content, embedding):
-    try:
-        conn = psycopg2.connect(db_conn)
-    except psycopg2.OperationalError as exc:
-        if "postgres-data" in db_conn:
-            fallback_conn = db_conn.replace("postgres-data:5432", "localhost:5433")
-            print('Format connection with localhost ...')
-            conn = psycopg2.connect(fallback_conn)
-        else:
-            raise
+    conn = create_db_connection(db_conn=db_conn)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -67,14 +70,8 @@ def load_property_ids(db_conn: str = DB_CONN) -> set[str]:
     collect_data_query = """
         SELECT * FROM property_listings limit 10;
     """
-    try:
-        conn = psycopg2.connect(db_conn)
-    except psycopg2.OperationalError as exc:
-        if "postgres-data" in db_conn:
-            fallback_conn = db_conn.replace("postgres-data:5432", "localhost:5433")
-            conn = psycopg2.connect(fallback_conn)
-        else:
-            raise
+
+    conn = create_db_connection(db_conn=db_conn)
 
     try:
         with conn.cursor() as cur:
@@ -133,12 +130,49 @@ def ingest_embedding_dag(openai_key, properties):
 
     print(f"Embedded: {property_data['property_id']}")
 
-def search_property(conn, question):
+def refine_question(question):
+    prompt = f"""
+        Anda adalah ahli properti, tugas anda adalah mendetailkan pertanyaan user menjadi lebih jelas.
+
+        CONTOH pertanyaan (input) : "beri info rumah harga murah dong?"
+
+        Dalam mendetailkan pertanyaan lakukan langkah-langkah ini:
+        1. Pahami kata kunci permintaan
+            - Contoh: "murah", "luas", "akses mudah", dst
+        2. Cari kolom di database property ("property_name", "location", "property_id", "price", "land_area_m2", "building_area_m2", "certificate", "hoek", "bedrooms", "bathrooms", "electrical_voltage") yang represent permintaan user
+            - Contoh: murah -> price, rumah luas -> land_area_m2, falitias lengkap -> bedrooms", "bathrooms", "electrical_voltage", dan seterusnya.
+        3. Lalu susun ulang dari pendetailan anda menjadi sebuah pertanyaan baru yang lebih detail.
+
+        OUTPUT: Langsung tampilkan pertanyaan baru
+            - CONTOH Ekspektasi hasil : "IBisakah Anda memberikan informasi tentang rumah di daerah Bekasi dengan nomina harganya murah, serta detail mengenai harga, ukuran tanah dan bangunan, serta jumlah kamar tidur dan kamar mandi yang tersedia?"
+
+        <pertanyaan>
+        {question}
+        <pertanyaan>
+    """
+    client = OpenAI(api_key=OPENAI_KEY)
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        temperature=0.1,
+        input=prompt
+    )
+
+    refined_question = response.output_text
+
+    print('-' * 10)
+    print(refined_question)
+    print('-' * 10)
+
+    return refined_question
+
+def search_property(db_conn, question):
     print(f'Question : {question}')
+    conn = create_db_connection(db_conn=db_conn)
+    refined_question = refine_question(question)
     cursor = conn.cursor()
     query_embedding = get_embedding(
         OpenAI(api_key=OPENAI_KEY), 
-        question
+        refined_question
     )
     
     cursor.execute(
@@ -153,22 +187,5 @@ def search_property(conn, question):
         """,
         (query_embedding,)
     )
-
-    print(cursor.fetchall())
-
     return cursor.fetchall()
-
-if __name__ == "__main__":
-    try:
-        conn = psycopg2.connect(DB_CONN)
-    except psycopg2.OperationalError as exc:
-        if "postgres-data" in DB_CONN:
-            fallback_conn = DB_CONN.replace("postgres-data:5432", "localhost:5433")
-            conn = psycopg2.connect(fallback_conn)
-        else:
-            raise
-    search_property(
-        conn=conn,
-        question="tunjukan kepada saya rumah-rumah bertipe minimalis dn murah di bogor"
-    )
     
