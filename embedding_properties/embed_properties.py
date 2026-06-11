@@ -10,13 +10,17 @@ OPENAI_KEY = os.environ["OPENAI_API_KEY"]
 def create_document(row):
 
     return f"""
-    Property: {row['property_name']}
-    Location: {row['location']}
-    Price: {row['price']}
-    Bedrooms: {row['bedrooms']}
-    Bathrooms: {row['bathrooms']}
-    Land Area: {row['land_area_m2']}
-    Building Area: {row['building_area_m2']}
+    Nama properti: {row['property_name']}
+    Lokasi: {row['location']}
+    Harga: {row['price']}
+    Jumlah Lantai: {row['floors']}
+    Jumlah Tempat Tidur: {row['bedrooms']}
+    Jumlah Kamar Mandi: {row['bathrooms']}
+    Luas Tanah (m2): {row['land_area_m2']}
+    Luas Bangunan (m2): {row['building_area_m2']}
+    Jenis Sertifikat: {row['certificate']}
+    Berada di Hook: {row['hoek']}
+    Tegangan Listrik: {row['electrical_voltage']}
     """
 
 def create_db_connection(db_conn):

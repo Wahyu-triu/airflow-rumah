@@ -98,7 +98,16 @@ services:
         condition: service_completed_successfully
     environment:
       - PYTHONPATH=/opt/airflow
-
+  
+  #  ── Chatbot ─────────────────────────────────────────────────────
+  chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile.chatbot
+    env_file:
+      - .env
+    container_name: telegram-chatbot
+    
 volumes:
   postgres_airflow_data:
   postgres_data:

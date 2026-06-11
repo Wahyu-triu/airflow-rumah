@@ -1,0 +1,10 @@
+lxml
+psycopg2-binary
+dateparser
+openai
+langchain-experimental
+langchain 
+langchain-openai
+langchain-community
+langchain-postgres
+python-telegram-bot

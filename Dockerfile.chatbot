@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+USER root
+RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+COPY requirements-chatbot.txt .
+RUN pip install --no-cache-dir -r requirements-chatbot.txt
+
+COPY embedding_properties/ ./embedding_properties/
+COPY telegram_chatbot/ ./telegram_chatbot/
+
+CMD ["python", "-u", "telegram_chatbot/chatbot.py"]

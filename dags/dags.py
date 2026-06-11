@@ -18,11 +18,14 @@ from embedding_properties.embed_properties import ingest_embedding_dag
 
 logger = logging.getLogger(__name__)
 
-LOCATION = "Bogor"
-PAGES    = 1        # how many listing pages per daily run
+# LOCATION = "Bekasi"
+# PAGES    = 20      # how many listing pages per daily run
 
 DB_CONN  = os.environ["PROPERTY_DB_CONN"]   # set in .env
 OPENAI_KEY = os.environ["OPENAI_API_KEY"]
+
+CITIES = ["bogor", "bekasi", "jakarta", "depok"]
+PAGES_PER_RUN = 5
 
 default_args = {
     "owner": "airflow",
@@ -31,22 +34,36 @@ default_args = {
     "email_on_failure": False,
 }
 
-
 # ── Task functions ─────────────────────────────────────────────────────────
-
-def task_scrape(**context):
+def task_scrape(city, pages, **context):
     """Scrape listings and push raw data to XCom."""
-    listings = scrape_belirumah(location=LOCATION, pages=PAGES)
+    listings = scrape_belirumah(location=city, pages=pages)
     logger.info("Scraped %d listings.", len(listings))
-    context["ti"].xcom_push(key="listings", value=listings)
+    context["ti"].xcom_push(key=f"listings_{city}", value=listings)
 
+def task_load_all(**context):
+    """
+        Pull listings from ALL city scrape tasks, merge, then upsert into Postgres.
+        Runs once after every city scraper has finished.
+    """
+    ti = context["ti"]
+    all_listings = []
+    for city in CITIES:
+        listings = ti.xcom_pull(
+            key=f"listings_{city}",
+            task_ids=f"scrape_property_data_{city}",
+        )
+        if listings:
+            logger.info(f"Pulled listings from {city}")
+            all_listings.extend(listings)
+        else:
+            logger.warning("No listings returned for %s.", city)
 
-def task_load(**context):
-    """Pull listings from XCom, upsert into Postgres."""
-    listings = context["ti"].xcom_pull(key="listings", task_ids="scrape_listings")
-    if not listings:
-        logger.warning("No listings to load.")
+    if not all_listings:
+        logger.warning("Nothing to load across all cities.")
         return
+    
+    print(f'Total listing collected: {len(all_listings)}')
 
     insert_sql = """
         INSERT INTO property_listings (
@@ -66,14 +83,21 @@ def task_load(**context):
     conn = psycopg2.connect(DB_CONN)
     try:
         with conn, conn.cursor() as cur:
-            cur.executemany(insert_sql, listings)
+            cur.executemany(insert_sql, all_listings)
             logger.info("Upserted %d rows.", cur.rowcount)
     finally:
         conn.close()
 
-def task_embedding(**context):
+    # Push merged listings downstream for the embed task
+    logger.info("Push all_listings to XCom")
+    ti.xcom_push(key="all_listings", value=all_listings)
+
+def task_embed_all(**context):
     """Pull listings from XCom, Embedd using embedding model upsert into Postgres."""
-    listings = context["ti"].xcom_pull(key="listings", task_ids="scrape_listings")
+    listings = context["ti"].xcom_pull(
+        key="all_listings",
+        task_ids="load_to_postgres",
+    )
     if not listings:
         logger.warning("No listings to load.")
         return
@@ -82,32 +106,40 @@ def task_embedding(**context):
         openai_key=OPENAI_KEY, 
         properties=listings
     )
+    logger.info("Embedded %d listings.", len(listings))
 
 # ── DAG definition ─────────────────────────────────────────────────────────
-
 with DAG(
     dag_id="belirumah_daily",
     default_args=default_args,
-    description="Daily scrape of BeliRumah.co listings for Bogor",
+    description="Daily scrape of BeliRumah.co",
     schedule="0 1 * * *",      # 01:00 UTC = 08:00 WIB
     start_date=datetime(2024, 1, 1),
     catchup=False,
-    tags=["scraper", "property", "bogor"],
+    tags=["scraper", "property"],
 ) as dag:
-
-    scrape = PythonOperator(
-        task_id="scrape_listings",
-        python_callable=task_scrape,
-    )
-
+    
+    # One shared load task
     load = PythonOperator(
         task_id="load_to_postgres",
-        python_callable=task_load,
+        python_callable=task_load_all,
     )
     
-    embedd = PythonOperator(
-        task_id="embedd_data_using_llm",
-        python_callable=task_embedding,
+    # One shared embed task
+    embed = PythonOperator(
+        task_id="embed_data_using_llm",
+        python_callable=task_embed_all,
     )
 
-    scrape >> load >> embedd
+    for city in CITIES:
+        scrape = PythonOperator(
+            task_id=f"scrape_property_data_{city}",
+            python_callable=task_scrape,
+            op_kwargs={
+                "city" : city,
+                "pages"  : PAGES_PER_RUN
+            }
+        )
+
+        scrape >> load
+    load >> embed
