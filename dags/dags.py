@@ -18,14 +18,11 @@ from embedding_properties.embed_properties import ingest_embedding_dag
 
 logger = logging.getLogger(__name__)
 
-# LOCATION = "Bekasi"
-# PAGES    = 20      # how many listing pages per daily run
-
 DB_CONN  = os.environ["PROPERTY_DB_CONN"]   # set in .env
 OPENAI_KEY = os.environ["OPENAI_API_KEY"]
 
 CITIES = ["bogor", "bekasi", "jakarta", "depok"]
-PAGES_PER_RUN = 5
+PAGES_PER_RUN = 2
 
 default_args = {
     "owner": "airflow",
